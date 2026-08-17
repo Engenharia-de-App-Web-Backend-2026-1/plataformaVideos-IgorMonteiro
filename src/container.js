@@ -14,6 +14,7 @@ const createUploadVideo = require('./usecases/uploadVideo');
 const createProcessVideo = require('./usecases/processVideo');
 
 const createUploadController = require('./interfaces/http/uploadController');
+const createProgressController = require('./interfaces/http/progressController');
 const createRoutes = require('./interfaces/http/routes');
 const createVideoJobConsumer = require('./interfaces/messaging/videoJobConsumer');
 
@@ -23,10 +24,12 @@ async function buildApiContainer() {
   const videoRepository = createPostgresVideoRepository();
   const { channel } = await amqpConnection.connect();
   const jobPublisher = createAmqpPublisher(channel);
+  const subscriber = redisPubSub.createSubscriber();
 
   const uploadVideoUsecase = createUploadVideo({ videoRepository, jobPublisher });
   const uploadController = createUploadController({ uploadVideoUsecase });
-  const routes = createRoutes({ uploadController });
+  const progressController = createProgressController({ subscriber });
+  const routes = createRoutes({ uploadController, progressController });
 
   return { routes };
 }

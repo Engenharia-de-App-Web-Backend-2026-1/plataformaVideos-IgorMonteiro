@@ -1,5 +1,6 @@
 'use strict';
 
+const path = require('path');
 const express = require('express');
 const config = require('./infra/config');
 const logger = require('./infra/logger');
@@ -15,6 +16,7 @@ async function start() {
     res.status(200).json({ status: 'ok' });
   });
 
+  app.use(express.static(path.join(__dirname, '..', 'public')));
   app.use(routes);
   app.use(errorHandler);
 
