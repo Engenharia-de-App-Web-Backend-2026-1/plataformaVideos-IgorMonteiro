@@ -1,0 +1,18 @@
+{
+  "name": "p1-video-platform",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "worker": "node src/worker.js"
+  },
+  "dependencies": {
+    "amqplib": "^0.10.4",
+    "express": "^4.19.2",
+    "fluent-ffmpeg": "^2.1.3",
+    "ioredis": "^5.4.1",
+    "multer": "^2.0.0",
+    "pg": "^8.12.0"
+  }
+}

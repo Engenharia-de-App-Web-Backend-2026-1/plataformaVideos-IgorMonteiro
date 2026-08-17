@@ -1,0 +1,97 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: p1-postgres
+    environment:
+      POSTGRES_USER: videos
+      POSTGRES_PASSWORD: videos
+      POSTGRES_DB: videos
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U videos -d videos"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: p1-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: videos
+      RABBITMQ_DEFAULT_PASS: videos
+    ports:
+      - "5673:5672"
+      - "15673:15672"   # painel de gestão: http://localhost:15673
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: p1-redis
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: p1-api
+    command: node src/server.js
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://videos:videos@postgres:5432/videos
+      RABBITMQ_URL: amqp://videos:videos@rabbitmq:5672
+      REDIS_URL: redis://redis:6379
+      STORAGE_PATH: /app/storage
+      TRANSCRIPTION_API_URL: http://transcription.invalid/v1
+    ports:
+      - "3000:3000"
+    volumes:
+      - storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # sem container_name: permite `docker compose up -d --scale worker=3`
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: node src/worker.js
+    environment:
+      DATABASE_URL: postgres://videos:videos@postgres:5432/videos
+      RABBITMQ_URL: amqp://videos:videos@rabbitmq:5672
+      REDIS_URL: redis://redis:6379
+      STORAGE_PATH: /app/storage
+      TRANSCRIPTION_API_URL: http://transcription.invalid/v1
+    volumes:
+      - storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  storage:
