@@ -14,6 +14,10 @@ function createPostgresVideoRepository() {
         [video.id, video.originalFilename, video.storagePath, video.status, JSON.stringify(video.progress)],
       );
     },
+
+    async updateStatus(id, status) {
+      await pool.query('UPDATE videos SET status = $1, updated_at = now() WHERE id = $2', [status, id]);
+    },
   };
 }
 

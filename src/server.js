@@ -3,11 +3,11 @@
 const express = require('express');
 const config = require('./infra/config');
 const logger = require('./infra/logger');
-const buildContainer = require('./container');
+const { buildApiContainer } = require('./container');
 const errorHandler = require('./interfaces/http/errorHandler');
 
 async function start() {
-  const { routes } = await buildContainer();
+  const { routes } = await buildApiContainer();
 
   const app = express();
 
