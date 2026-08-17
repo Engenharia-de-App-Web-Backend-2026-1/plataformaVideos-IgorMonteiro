@@ -5,7 +5,8 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "worker": "node src/worker.js"
+    "worker": "node src/worker.js",
+    "test": "node --test"
   },
   "dependencies": {
     "amqplib": "^0.10.4",
