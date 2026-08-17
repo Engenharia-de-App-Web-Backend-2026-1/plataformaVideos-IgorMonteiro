@@ -1,6 +1,26 @@
 'use strict';
 
 function createProgressController({ subscriber }) {
+  const channelRefCounts = new Map();
+
+  function acquireChannel(channel) {
+    const count = channelRefCounts.get(channel) || 0;
+    channelRefCounts.set(channel, count + 1);
+    if (count === 0) {
+      subscriber.subscribe(channel);
+    }
+  }
+
+  function releaseChannel(channel) {
+    const count = channelRefCounts.get(channel) || 0;
+    if (count <= 1) {
+      channelRefCounts.delete(channel);
+      subscriber.unsubscribe(channel);
+    } else {
+      channelRefCounts.set(channel, count - 1);
+    }
+  }
+
   return {
     handle(req, res) {
       const { id } = req.params;
@@ -20,7 +40,7 @@ function createProgressController({ subscriber }) {
       };
 
       subscriber.on('message', onMessage);
-      subscriber.subscribe(channel);
+      acquireChannel(channel);
 
       const keepAlive = setInterval(() => {
         res.write(': ping\n\n');
@@ -28,7 +48,7 @@ function createProgressController({ subscriber }) {
 
       req.on('close', () => {
         clearInterval(keepAlive);
-        subscriber.unsubscribe(channel);
+        releaseChannel(channel);
         subscriber.off('message', onMessage);
       });
     },

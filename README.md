@@ -55,12 +55,24 @@ npm install
 npm test
 ```
 
-Testes automatizados cobrem a camada `domain/` (zero dependências de
-terceiros), validando as invariantes de `Video` e o parsing de
-`ProcessingJob`. Fluxos de integração (upload → fila → worker → SSE) foram
-validados manualmente ponta a ponta durante o desenvolvimento, subindo os
-containers reais e enviando um vídeo gerado com `ffmpeg` (ver histórico de
-commits).
+Testes automatizados (`node:test`, sem framework adicional) cobrem:
+
+- `domain/`: invariantes de `Video`, parsing de `ProcessingJob`, arredondamento
+  de `ProgressUpdate` e a lista de `resolutions`.
+- `usecases/`: `uploadVideo` e `processVideo` com mocks manuais das
+  dependências injetadas (repositório, publisher, ffmpeg adapter, serviço de
+  transcrição, logger) — cobrindo o caminho feliz, falha do ffmpeg (status
+  `failed` + propagação do erro) e falha best-effort da transcrição (não
+  derruba o job).
+- `interfaces/messaging/videoJobConsumer`: ack em sucesso, nack sem requeue em
+  JSON inválido e em erro do usecase.
+- `interfaces/http/progressController`: assinatura/desinscrição do canal
+  Redis por vídeo, incluindo o caso de duas conexões SSE assistindo ao mesmo
+  vídeo (a primeira que fecha não pode cortar a segunda).
+
+Fluxos de integração (upload → fila → worker → SSE) foram validados
+manualmente ponta a ponta durante o desenvolvimento, subindo os containers
+reais e enviando um vídeo gerado com `ffmpeg` (ver histórico de commits).
 
 ## Limitação conhecida: legendagem automática
 
