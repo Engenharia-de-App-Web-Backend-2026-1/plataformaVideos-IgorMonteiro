@@ -1,12 +1,17 @@
 'use strict';
 
-const { ValidationError } = require('../../domain/errors');
+const { ValidationError, NotFoundError } = require('../../domain/errors');
 const logger = require('../../infra/logger');
 
 // eslint-disable-next-line no-unused-vars
 function errorHandler(err, req, res, next) {
   if (err instanceof ValidationError) {
     res.status(400).json({ error: err.message });
+    return;
+  }
+
+  if (err instanceof NotFoundError) {
+    res.status(404).json({ error: err.message });
     return;
   }
 

@@ -5,13 +5,17 @@ const ffmpeg = require('fluent-ffmpeg');
 const WATERMARK_TEXT = 'P1-Dev';
 const FONT_FILE = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
 
-function transcode({ inputPath, outputPath, height, onProgress }) {
+function transcode({ inputPath, outputPath, height, watermark, onProgress }) {
   return new Promise((resolve, reject) => {
-    ffmpeg(inputPath)
-      .videoFilters([
-        `scale=-2:${height}`,
+    const filters = [`scale=-2:${height}`];
+    if (watermark) {
+      filters.push(
         `drawtext=fontfile=${FONT_FILE}:text='${WATERMARK_TEXT}':fontcolor=white:fontsize=24:x=10:y=h-th-10:box=1:boxcolor=black@0.5`,
-      ])
+      );
+    }
+
+    ffmpeg(inputPath)
+      .videoFilters(filters)
       .on('progress', (progress) => {
         if (onProgress && typeof progress.percent === 'number') {
           onProgress(Math.min(100, Math.max(0, progress.percent)));

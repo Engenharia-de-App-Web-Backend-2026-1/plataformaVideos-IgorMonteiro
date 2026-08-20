@@ -35,3 +35,21 @@ test('preserva videoId, stage e status repassados', () => {
   assert.equal(update.stage, 'extraindo_audio');
   assert.equal(update.status, 'processing');
 });
+
+test('inclui o outputPath quando a etapa gerou um arquivo', () => {
+  const update = ProgressUpdate.create({
+    videoId: 'v1',
+    stage: 'convertendo_720p',
+    percent: 100,
+    status: 'processing',
+    outputPath: 'video-720p.mp4',
+  });
+
+  assert.equal(update.outputPath, 'video-720p.mp4');
+});
+
+test('outputPath é nulo quando a etapa não gerou arquivo (ex: progresso intermediário)', () => {
+  const update = ProgressUpdate.create({ videoId: 'v1', stage: 'convertendo_720p', percent: 45, status: 'processing' });
+
+  assert.equal(update.outputPath, null);
+});

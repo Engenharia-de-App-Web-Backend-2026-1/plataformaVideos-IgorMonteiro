@@ -13,42 +13,53 @@ function createProcessVideo({
   logger,
   storageBasePath,
 }) {
-  return async function processVideo({ videoId, storagePath }) {
+  return async function processVideo({ videoId, storagePath, actions }) {
+    // `actions` já chega validado pelo boundary que recebeu a mensagem
+    // (ProcessingJob.parse) — o usecase só decide o que executar com base
+    // nele, sem repetir a regra de negócio de "pelo menos uma ação".
+    const { resolutions = [], extractAudio = false, watermark = false } = actions || {};
     const inputPath = path.join(storageBasePath, storagePath);
     const baseName = path.parse(storagePath).name;
 
-    async function publish(stage, percent) {
+    async function publish(stage, percent, outputPath) {
       await progressPublisher.publishProgress(
         videoId,
-        ProgressUpdate.create({ videoId, stage, percent, status: STATUS.PROCESSING }),
+        ProgressUpdate.create({ videoId, stage, percent, status: STATUS.PROCESSING, outputPath }),
       );
     }
 
     await videoRepository.updateStatus(videoId, STATUS.PROCESSING);
 
     try {
-      for (const resolution of RESOLUTIONS) {
-        const outputPath = path.join(storageBasePath, `${baseName}-${resolution.label}.mp4`);
+      const resolutionsToProcess = RESOLUTIONS.filter((r) => resolutions.includes(r.label));
+
+      for (const resolution of resolutionsToProcess) {
+        const outputFile = `${baseName}-${resolution.label}.mp4`;
+        const outputPath = path.join(storageBasePath, outputFile);
         await videoProcessor.transcode({
           inputPath,
           outputPath,
           height: resolution.height,
+          watermark,
           onProgress: (percent) => publish(`convertendo_${resolution.label}`, percent),
         });
-        await publish(`convertendo_${resolution.label}`, 100);
+        await publish(`convertendo_${resolution.label}`, 100, outputFile);
       }
 
-      const audioPath = path.join(storageBasePath, `${baseName}.mp3`);
-      await videoProcessor.extractAudio({ inputPath, outputPath: audioPath });
-      await publish('extraindo_audio', 100);
+      if (extractAudio) {
+        const audioFile = `${baseName}.mp3`;
+        const audioPath = path.join(storageBasePath, audioFile);
+        await videoProcessor.extractAudio({ inputPath, outputPath: audioPath });
+        await publish('extraindo_audio', 100, audioFile);
 
-      try {
-        await transcriptionService.transcribe({ videoId, audioPath });
-      } catch (err) {
-        logger.warn('falha ao gerar legendagem automática, seguindo sem legendas', {
-          videoId,
-          message: err.message,
-        });
+        try {
+          await transcriptionService.transcribe({ videoId, audioPath });
+        } catch (err) {
+          logger.warn('falha ao gerar legendagem automática, seguindo sem legendas', {
+            videoId,
+            message: err.message,
+          });
+        }
       }
 
       await videoRepository.updateStatus(videoId, STATUS.COMPLETED);

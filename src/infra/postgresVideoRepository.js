@@ -18,6 +18,14 @@ function createPostgresVideoRepository() {
     async updateStatus(id, status) {
       await pool.query('UPDATE videos SET status = $1, updated_at = now() WHERE id = $2', [status, id]);
     },
+
+    async findById(id) {
+      const { rows } = await pool.query(
+        'SELECT id, storage_path AS "storagePath", status FROM videos WHERE id = $1',
+        [id],
+      );
+      return rows[0] || null;
+    },
   };
 }
 

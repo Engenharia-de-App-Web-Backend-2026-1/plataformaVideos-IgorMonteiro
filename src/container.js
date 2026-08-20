@@ -12,9 +12,11 @@ const transcriptionService = require('./services/transcriptionService');
 
 const createUploadVideo = require('./usecases/uploadVideo');
 const createProcessVideo = require('./usecases/processVideo');
+const createGetVideoFile = require('./usecases/getVideoFile');
 
 const createUploadController = require('./interfaces/http/uploadController');
 const createProgressController = require('./interfaces/http/progressController');
+const createDownloadController = require('./interfaces/http/downloadController');
 const createRoutes = require('./interfaces/http/routes');
 const createVideoJobConsumer = require('./interfaces/messaging/videoJobConsumer');
 
@@ -27,9 +29,11 @@ async function buildApiContainer() {
   const subscriber = redisPubSub.createSubscriber();
 
   const uploadVideoUsecase = createUploadVideo({ videoRepository, jobPublisher });
+  const getVideoFileUsecase = createGetVideoFile({ videoRepository });
   const uploadController = createUploadController({ uploadVideoUsecase });
   const progressController = createProgressController({ subscriber });
-  const routes = createRoutes({ uploadController, progressController });
+  const downloadController = createDownloadController({ getVideoFileUsecase });
+  const routes = createRoutes({ uploadController, progressController, downloadController });
 
   return { routes };
 }

@@ -4,4 +4,6 @@ class DomainError extends Error {}
 
 class ValidationError extends DomainError {}
 
-module.exports = { DomainError, ValidationError };
+class NotFoundError extends DomainError {}
+
+module.exports = { DomainError, ValidationError, NotFoundError };

@@ -30,13 +30,39 @@ test('processa a mensagem e dá ack quando o usecase tem sucesso', async () => {
   };
   const handleMessage = createVideoJobConsumer({ processVideoUsecase });
   const channel = createFakeChannel();
+  const msg = fakeMessage({
+    videoId: 'v1',
+    storagePath: 'v1.mp4',
+    actions: { resolutions: ['720p'], extractAudio: false, watermark: false },
+  });
+
+  await handleMessage(channel, msg);
+
+  assert.deepEqual(calls, [
+    {
+      videoId: 'v1',
+      storagePath: 'v1.mp4',
+      actions: { resolutions: ['720p'], extractAudio: false, watermark: false },
+    },
+  ]);
+  assert.equal(channel.acked.length, 1);
+  assert.equal(channel.nacked.length, 0);
+});
+
+test('descarta (nack sem requeue) mensagem sem nenhuma ação selecionada', async () => {
+  let called = false;
+  const processVideoUsecase = async () => {
+    called = true;
+  };
+  const handleMessage = createVideoJobConsumer({ processVideoUsecase });
+  const channel = createFakeChannel();
   const msg = fakeMessage({ videoId: 'v1', storagePath: 'v1.mp4' });
 
   await handleMessage(channel, msg);
 
-  assert.deepEqual(calls, [{ videoId: 'v1', storagePath: 'v1.mp4' }]);
-  assert.equal(channel.acked.length, 1);
-  assert.equal(channel.nacked.length, 0);
+  assert.equal(called, false);
+  assert.equal(channel.nacked.length, 1);
+  assert.equal(channel.nacked[0].requeue, false);
 });
 
 test('descarta (nack sem requeue) mensagem com JSON inválido, sem chamar o usecase', async () => {
@@ -61,7 +87,11 @@ test('dá nack sem requeue quando o usecase lança erro', async () => {
   };
   const handleMessage = createVideoJobConsumer({ processVideoUsecase });
   const channel = createFakeChannel();
-  const msg = fakeMessage({ videoId: 'v1', storagePath: 'v1.mp4' });
+  const msg = fakeMessage({
+    videoId: 'v1',
+    storagePath: 'v1.mp4',
+    actions: { resolutions: ['720p'], extractAudio: false, watermark: false },
+  });
 
   await handleMessage(channel, msg);
 

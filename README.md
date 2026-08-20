@@ -2,7 +2,9 @@
 
 Upload de vídeo sob demanda: conversão para 360p/720p/1080p, extração de áudio
 para legendagem automática e marca d'água, com progresso em tempo real no
-navegador.
+navegador. Nenhuma ação roda automaticamente — o usuário escolhe, por
+upload, exatamente quais resoluções converter, se extrai áudio e se aplica
+marca d'água (ver `domain/processingActions.js`).
 
 ## Requisitos
 
@@ -16,15 +18,42 @@ docker compose up -d --build
 
 Aguarde os serviços ficarem `healthy` (`docker compose ps`) e abra
 `http://localhost:3000` no navegador para usar o mini-cliente de upload, ou
-teste via API:
+teste via API. O upload aceita quais ações executar via campos de formulário
+(`resolutions` pode se repetir, uma vez por resolução marcada):
 
 ```bash
-curl -F "video=@caminho/do/video.mp4" http://localhost:3000/videos
-# => {"videoId":"...","status":"uploaded"}
+curl -F "video=@caminho/do/video.mp4" \
+     -F "resolutions=720p" \
+     -F "resolutions=1080p" \
+     -F "extractAudio=true" \
+     -F "watermark=true" \
+     http://localhost:3000/videos
+# => {
+#      "videoId": "...",
+#      "status": "uploaded",
+#      "actions": {"resolutions":["720p","1080p"],"extractAudio":true,"watermark":true},
+#      "destination": {
+#        "directory": "/app/storage",
+#        "files": ["<nome>-720p.mp4", "<nome>-1080p.mp4", "<nome>.mp3"]
+#      }
+#    }
 
 curl -N http://localhost:3000/videos/<videoId>/progress
-# stream de eventos SSE: {"stage":"convertendo_720p","percent":45,...}
+# stream de eventos SSE: {"stage":"convertendo_720p","percent":100,"outputPath":"<nome>-720p.mp4",...}
+
+curl -O -J http://localhost:3000/videos/<videoId>/files/<nome>-720p.mp4
 ```
+
+Pelo menos uma ação precisa ser selecionada (uma resolução ou a extração de
+áudio) — sem isso a API responde `400` (`ProcessingActions`, em
+`src/domain/processingActions.js`). O campo `destination` avisa, já na
+resposta do upload, onde os arquivos resultantes vão ser gravados no volume
+compartilhado; cada evento SSE de conclusão de etapa repete o `outputPath`
+daquele arquivo específico, e o mini-cliente usa isso para virar um link de
+download (`GET /videos/:id/files/:filename`) assim que o arquivo fica
+pronto. Esse endpoint só libera nomes que batem com a convenção de saída do
+próprio vídeo pedido (`usecases/getVideoFile.js`) — path traversal ou nomes
+de outro vídeo voltam `400`/`404`.
 
 Para demonstrar o escalonamento horizontal dos workers (competing consumers):
 
@@ -57,15 +86,21 @@ npm test
 
 Testes automatizados (`node:test`, sem framework adicional) cobrem:
 
-- `domain/`: invariantes de `Video`, parsing de `ProcessingJob`, arredondamento
-  de `ProgressUpdate` e a lista de `resolutions`.
+- `domain/`: invariantes de `Video`, parsing de `ProcessingJob`, validação de
+  `processingActions` (pelo menos uma ação escolhida, marca d'água sem
+  resolução é desligada), arredondamento/`outputPath` de `ProgressUpdate` e a
+  lista de `resolutions`.
 - `usecases/`: `uploadVideo` e `processVideo` com mocks manuais das
   dependências injetadas (repositório, publisher, ffmpeg adapter, serviço de
-  transcrição, logger) — cobrindo o caminho feliz, falha do ffmpeg (status
-  `failed` + propagação do erro) e falha best-effort da transcrição (não
-  derruba o job).
+  transcrição, logger) — cobrindo o caminho feliz, execução seletiva das
+  ações escolhidas (só converte/extrai o que foi marcado), falha do ffmpeg
+  (status `failed` + propagação do erro) e falha best-effort da transcrição
+  (não derruba o job).
 - `interfaces/messaging/videoJobConsumer`: ack em sucesso, nack sem requeue em
   JSON inválido e em erro do usecase.
+- `usecases/getVideoFile`: libera download apenas de nomes que seguem a
+  convenção de saída do vídeo pedido; rejeita path traversal (`400`) e
+  vídeo/arquivo inexistente (`404`).
 - `interfaces/http/progressController`: assinatura/desinscrição do canal
   Redis por vídeo, incluindo o caso de duas conexões SSE assistindo ao mesmo
   vídeo (a primeira que fecha não pode cortar a segunda).

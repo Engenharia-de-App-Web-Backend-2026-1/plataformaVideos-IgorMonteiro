@@ -1,6 +1,7 @@
 'use strict';
 
 const { ValidationError } = require('./errors');
+const ProcessingActions = require('./processingActions');
 
 function parse(rawMessage) {
   let data;
@@ -14,7 +15,9 @@ function parse(rawMessage) {
     throw new ValidationError('mensagem AMQP inválida: videoId e storagePath são obrigatórios');
   }
 
-  return { videoId: data.videoId, storagePath: data.storagePath };
+  const actions = ProcessingActions.parse(data.actions || {});
+
+  return { videoId: data.videoId, storagePath: data.storagePath, actions };
 }
 
 module.exports = { parse };

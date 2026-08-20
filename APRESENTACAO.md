@@ -112,18 +112,32 @@ curl http://localhost:3000/health   # {"status":"ok"}
 ### 6.2 Testar pelo mini-cliente (mais visual para a banca)
 
 Abra `http://localhost:3000` no navegador, selecione um arquivo de vídeo e
-clique em enviar. A barra `<progress>` atualiza sozinha via SSE — sem
-refresh.
+marque quais ações executar (nada roda automaticamente): resoluções
+(360p/720p/1080p), extração de áudio e/ou marca d'água. Ao enviar, a barra de
+progresso atualiza sozinha via SSE — sem refresh — e a tela mostra o
+diretório e a lista de arquivos de destino, trocando cada item por um link
+"baixar" conforme o worker termina aquela etapa — clique baixa o arquivo
+direto do navegador (`GET /videos/:id/files/:filename`).
 
 ### 6.3 Testar via linha de comando (mostra o payload cru)
 
 ```bash
-curl -F "video=@caminho/do/video.mp4" http://localhost:3000/videos
-# => {"videoId":"...","status":"uploaded"}   (HTTP 202)
+curl -F "video=@caminho/do/video.mp4" \
+     -F "resolutions=720p" \
+     -F "extractAudio=true" \
+     -F "watermark=true" \
+     http://localhost:3000/videos
+# => {"videoId":"...","status":"uploaded","actions":{...},
+#     "destination":{"directory":"/app/storage","files":["<nome>-720p.mp4","<nome>.mp3"]}}
+#   (HTTP 202)
 
 curl -N http://localhost:3000/videos/<videoId>/progress
-# stream SSE: data: {"stage":"convertendo_720p","percent":45,...}
+# stream SSE: data: {"stage":"convertendo_720p","percent":45,"outputPath":null,...}
+# ao concluir a etapa: {"stage":"convertendo_720p","percent":100,"outputPath":"<nome>-720p.mp4",...}
 ```
+
+> Enviar sem marcar nenhuma ação retorna `400` — é o domínio
+> (`processingActions`) recusando um job que não faria nada.
 
 > **Importante para a demo**: conecte o SSE **logo após** o upload (ou use o
 > mini-cliente, que já faz isso automaticamente). Redis Pub/Sub não faz
@@ -156,9 +170,13 @@ npm install
 npm test
 ```
 
-28 testes (`node:test`, sem framework adicional), cobrindo:
-- `domain/`: invariantes de `Video`, parsing de `ProcessingJob`, `ProgressUpdate`, `resolutions`
-- `usecases/`: `uploadVideo` e `processVideo` — caminho feliz, falha do ffmpeg, falha best-effort de transcrição
+47 testes (`node:test`, sem framework adicional), cobrindo:
+- `domain/`: invariantes de `Video`, parsing de `ProcessingJob`, validação de
+  `processingActions` (escolha de ações do usuário), `ProgressUpdate`
+  (incluindo `outputPath`), `resolutions`
+- `usecases/`: `uploadVideo` e `processVideo` — caminho feliz, execução
+  seletiva das ações escolhidas, falha do ffmpeg, falha best-effort de
+  transcrição
 - `interfaces/messaging/videoJobConsumer`: ack em sucesso, nack sem requeue em erro/JSON inválido
 - `interfaces/http/progressController`: assinatura/desinscrição do canal Redis, incluindo **duas conexões SSE simultâneas no mesmo vídeo** (bug corrigido no último commit — a primeira que fecha não pode cortar a segunda)
 
