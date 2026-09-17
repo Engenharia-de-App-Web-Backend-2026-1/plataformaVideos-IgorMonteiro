@@ -1,0 +1,91 @@
+{
+  "info": {
+    "name": "P1 - Plataforma de Processamento de Vídeo",
+    "description": "Endpoints da API. Suba o ambiente com `docker compose up -d --build` antes de testar. Variável {{baseUrl}} aponta para http://localhost:3000 por padrão; {{videoId}} é preenchida automaticamente pelo script de teste do request de upload.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "videoId", "value": "" },
+    { "key": "outputFile", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Health check",
+      "request": {
+        "method": "GET",
+        "url": { "raw": "{{baseUrl}}/health", "host": ["{{baseUrl}}"], "path": ["health"] }
+      }
+    },
+    {
+      "name": "Upload de vídeo (multipart)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const body = pm.response.json();",
+              "pm.collectionVariables.set('videoId', body.videoId);",
+              "if (body.destination && body.destination.files && body.destination.files.length) {",
+              "  pm.collectionVariables.set('outputFile', body.destination.files[0]);",
+              "}",
+              "pm.test('status 202', () => pm.response.to.have.status(202));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "url": { "raw": "{{baseUrl}}/videos", "host": ["{{baseUrl}}"], "path": ["videos"] },
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            { "key": "video", "type": "file", "src": [] },
+            { "key": "resolutions", "value": "720p", "type": "text" },
+            { "key": "resolutions", "value": "1080p", "type": "text" },
+            { "key": "extractAudio", "value": "true", "type": "text" },
+            { "key": "watermark", "value": "true", "type": "text" }
+          ]
+        },
+        "description": "Selecione um arquivo de vídeo local no campo 'video' antes de enviar. Repita o campo 'resolutions' uma vez por resolução desejada (360p/720p/1080p). Pelo menos uma ação (resolução ou extractAudio) é obrigatória, senão a API responde 400."
+      }
+    },
+    {
+      "name": "Consultar status do vídeo (Cache-Aside)",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/videos/{{videoId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["videos", "{{videoId}}"]
+        },
+        "description": "1ª chamada: cache miss no Redis, resposta vem do Postgres (fica cacheada). Chamadas seguintes dentro do TTL (CACHE_TTL_SECONDS + jitter): cache hit. Um videoId inexistente responde 404 e fica cacheado como \"não encontrado\" por CACHE_NOT_FOUND_TTL_SECONDS (mitigação de Cache Penetration)."
+      }
+    },
+    {
+      "name": "Progresso em tempo real (SSE)",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Accept", "value": "text/event-stream" }],
+        "url": {
+          "raw": "{{baseUrl}}/videos/{{videoId}}/progress",
+          "host": ["{{baseUrl}}"],
+          "path": ["videos", "{{videoId}}", "progress"]
+        },
+        "description": "Stream Server-Sent Events com o progresso real do ffmpeg. No Postman, use a aba de resposta em modo \"stream\"/console, ou teste via `curl -N`. Conecte logo após o upload: Redis Pub/Sub não faz replay de eventos já publicados."
+      }
+    },
+    {
+      "name": "Download do arquivo processado",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/videos/{{videoId}}/files/{{outputFile}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["videos", "{{videoId}}", "files", "{{outputFile}}"]
+        },
+        "description": "Só libera nomes que batem com a convenção de saída do vídeo pedido (usecases/getVideoFile.js). Retorna 404 se o arquivo ainda não foi gerado pelo worker."
+      }
+    }
+  ]
+}

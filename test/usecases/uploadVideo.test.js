@@ -6,28 +6,21 @@ const createUploadVideo = require('../../src/usecases/uploadVideo');
 const { ValidationError } = require('../../src/domain/errors');
 
 function createMocks() {
-  const saved = [];
-  const published = [];
+  const savedWithJob = [];
 
   return {
     videoRepository: {
-      async save(video) {
-        saved.push(video);
+      async saveWithJob(video, job) {
+        savedWithJob.push({ video, job });
       },
     },
-    jobPublisher: {
-      async publishVideoJob(job) {
-        published.push(job);
-      },
-    },
-    saved,
-    published,
+    savedWithJob,
   };
 }
 
-test('salva o vídeo e publica o job na fila com as ações escolhidas', async () => {
-  const { videoRepository, jobPublisher, saved, published } = createMocks();
-  const uploadVideo = createUploadVideo({ videoRepository, jobPublisher });
+test('salva o vídeo e o job na outbox, atomicamente, com as ações escolhidas', async () => {
+  const { videoRepository, savedWithJob } = createMocks();
+  const uploadVideo = createUploadVideo({ videoRepository });
 
   const result = await uploadVideo({
     originalFilename: 'aula.mp4',
@@ -35,48 +28,44 @@ test('salva o vídeo e publica o job na fila com as ações escolhidas', async (
     actions: { resolutions: ['720p'], extractAudio: true, watermark: true },
   });
 
-  assert.equal(saved.length, 1);
-  assert.equal(saved[0].id, result.video.id);
-  assert.equal(published.length, 1);
-  assert.deepEqual(published[0], {
+  assert.equal(savedWithJob.length, 1);
+  assert.equal(savedWithJob[0].video.id, result.video.id);
+  assert.deepEqual(savedWithJob[0].job, {
     videoId: result.video.id,
     storagePath: result.video.storagePath,
     actions: { resolutions: ['720p'], extractAudio: true, watermark: true },
   });
 });
 
-test('rejeita quando nenhuma ação foi selecionada e não publica job', async () => {
-  const { videoRepository, jobPublisher, saved, published } = createMocks();
-  const uploadVideo = createUploadVideo({ videoRepository, jobPublisher });
+test('rejeita quando nenhuma ação foi selecionada e não grava nada', async () => {
+  const { videoRepository, savedWithJob } = createMocks();
+  const uploadVideo = createUploadVideo({ videoRepository });
 
   await assert.rejects(
     () => uploadVideo({ originalFilename: 'aula.mp4', storagePath: '123-aula.mp4', actions: {} }),
     ValidationError,
   );
-  assert.equal(saved.length, 0);
-  assert.equal(published.length, 0);
+  assert.equal(savedWithJob.length, 0);
 });
 
-test('não publica job se a validação do domínio falhar', async () => {
-  const { videoRepository, jobPublisher, saved, published } = createMocks();
-  const uploadVideo = createUploadVideo({ videoRepository, jobPublisher });
+test('não grava nada se a validação do domínio falhar', async () => {
+  const { videoRepository, savedWithJob } = createMocks();
+  const uploadVideo = createUploadVideo({ videoRepository });
 
   await assert.rejects(
     () => uploadVideo({ storagePath: '123-aula.mp4', actions: { extractAudio: true } }),
     ValidationError,
   );
-  assert.equal(saved.length, 0);
-  assert.equal(published.length, 0);
+  assert.equal(savedWithJob.length, 0);
 });
 
-test('propaga erro do repositório sem publicar job', async () => {
-  const jobPublisher = { async publishVideoJob() { throw new Error('não deveria ser chamado'); } };
+test('propaga erro do repositório (ex.: transação da outbox falhou)', async () => {
   const videoRepository = {
-    async save() {
+    async saveWithJob() {
       throw new Error('falha de conexão com o banco');
     },
   };
-  const uploadVideo = createUploadVideo({ videoRepository, jobPublisher });
+  const uploadVideo = createUploadVideo({ videoRepository });
 
   await assert.rejects(
     () =>
@@ -90,8 +79,8 @@ test('propaga erro do repositório sem publicar job', async () => {
 });
 
 test('monta a prévia dos arquivos de destino a partir das ações escolhidas', async () => {
-  const { videoRepository, jobPublisher } = createMocks();
-  const uploadVideo = createUploadVideo({ videoRepository, jobPublisher });
+  const { videoRepository } = createMocks();
+  const uploadVideo = createUploadVideo({ videoRepository });
 
   const result = await uploadVideo({
     originalFilename: 'aula.mp4',

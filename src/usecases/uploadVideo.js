@@ -22,13 +22,17 @@ function plannedOutputFiles(storagePath, actions) {
   return files;
 }
 
-function createUploadVideo({ videoRepository, jobPublisher }) {
+function createUploadVideo({ videoRepository }) {
   return async function uploadVideo({ originalFilename, storagePath, actions }) {
     const video = Video.create({ originalFilename, storagePath });
     const parsedActions = ProcessingActions.parse(actions || {});
 
-    await videoRepository.save(video);
-    await jobPublisher.publishVideoJob({
+    // Grava o vídeo e enfileira o job na mesma transação (Transactional
+    // Outbox) — sem isso, uma falha entre "gravar no banco" e "publicar na
+    // fila" perderia o job silenciosamente (Dual-Write, ver README/ADR).
+    // O usecase não sabe que existe uma tabela outbox ou um broker AMQP por
+    // trás disso: só chama um método com nome de domínio no repositório.
+    await videoRepository.saveWithJob(video, {
       videoId: video.id,
       storagePath: video.storagePath,
       actions: parsedActions,

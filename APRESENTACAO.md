@@ -86,8 +86,10 @@ apresentação: nenhum `require` de infra dentro de `usecases/` ou `domain/`.**
 docker compose up -d --build
 ```
 
-Sobe **5 serviços**: `postgres`, `rabbitmq`, `redis`, `api`, `worker`. A API
-e o worker esperam os três primeiros ficarem `healthy` (`depends_on` com
+Sobe **6 serviços**: `postgres`, `rabbitmq`, `redis`, `api`, `worker`,
+`outbox-relay`. A API não depende mais do RabbitMQ (ver seção 10) — só do
+Postgres e do Redis; worker e outbox-relay esperam Postgres/RabbitMQ (e
+Redis, no caso do worker) ficarem `healthy` (`depends_on` com
 `condition: service_healthy`) antes de iniciar.
 
 Escalonamento horizontal — o `worker` não tem `container_name` no compose
@@ -182,6 +184,57 @@ npm test
 
 ---
 
+## 6.7 Extensão: consistência distribuída e cache com Redis
+
+Segunda rodada de entrega, sobre a mesma base: dois temas novos de
+sistemas distribuídos, aplicados de verdade no código (não só discutidos).
+
+### Transactional Outbox (resolve um Dual-Write real que existia no código)
+
+A versão anterior gravava o vídeo no Postgres e *depois* publicava no
+RabbitMQ como dois passos separados — o antipadrão **Dual-Write** de
+manual. Se o RabbitMQ estivesse fora do ar bem entre os dois passos, o
+vídeo ficava `uploaded` para sempre e nenhum worker era acionado.
+
+Correção: `uploadVideo` agora grava o vídeo **e** o job numa tabela
+`outbox`, na mesma transação ACID do Postgres. Um processo novo, o
+**outbox relay** (`outbox-relay`, *Polling Publisher*), drena essa tabela
+e publica cada evento pendente no RabbitMQ, só marcando como publicado
+depois da confirmação. Resultado prático: a API deixou de depender do
+RabbitMQ para aceitar upload — o `POST /videos` sobrevive à queda do
+broker (Basically Available).
+
+```bash
+docker compose stop rabbitmq
+curl -F "video=@video.mp4" -F "resolutions=720p" http://localhost:3000/videos
+# ainda responde 202 — o evento fica pendente na outbox até o broker voltar
+docker compose start rabbitmq
+docker compose logs -f outbox-relay
+# "evento pendente da outbox publicado na fila" assim que o RabbitMQ volta
+```
+
+### Cache-Aside, Cache Penetration, Cache Stampede e rate limiting (Redis)
+
+Endpoint novo: `GET /videos/:id` (status do vídeo), implementado com
+**Cache-Aside** — Redis primeiro, Postgres só em cache miss. Duas
+mitigações do material de Redis também aplicadas: cache do resultado
+"não encontrado" com TTL curto (Cache Penetration) e jitter no TTL do
+cache (Cache Stampede). `POST /videos` ganhou rate limiting por IP
+(`INCR`+`EXPIRE`, Redis Strings). O Redis do compose agora roda com
+`--maxmemory-policy allkeys-lru`.
+
+```bash
+curl http://localhost:3000/videos/<videoId>   # 1ª vez: cache miss, mais lento
+curl http://localhost:3000/videos/<videoId>   # 2ª vez: cache hit, mais rápido
+curl http://localhost:3000/videos/00000000-0000-0000-0000-000000000000
+curl http://localhost:3000/videos/00000000-0000-0000-0000-000000000000
+# ambas 404 — a 2ª nem toca o Postgres (marcador de "não encontrado" cacheado)
+```
+
+Detalhamento completo (contexto, decisão, consequências e alternativas
+descartadas — 2PC, Saga completa, CDC, Redlock) está no `README.md`, seção
+ADR-04 a ADR-09.
+
 ## 7. Limitação conhecida, declarada de propósito
 
 `TRANSCRIPTION_API_URL` aponta para `http://transcription.invalid/v1`
@@ -200,11 +253,13 @@ prova que a camada `services/` está isolada (um endpoint real só troca a env v
 | Controllers dentro de `interfaces/` | ✅ `interfaces/http` e `interfaces/messaging` |
 | Chamadas a API externa isoladas em `services/` | ✅ `services/transcriptionService.js` |
 | Lógica de negócio em Use Cases, isolada de infra/protocolo | ✅ verificado por grep — zero imports de infra em `usecases/` |
-| `docker compose up -d` sobe tudo (API, workers, banco, brokers/caches) | ✅ testado agora — 5 serviços, todos healthy |
+| `docker compose up -d` sobe tudo (API, workers, banco, brokers/caches) | ✅ testado agora — 6 serviços, todos healthy |
 | `docker-compose.yml` e Dockerfile na raiz | ✅ |
 | README com passo a passo exato | ✅ |
-| ADR preenchido no README, com alternativas descartadas justificadas | ✅ |
-| Exemplos de teste (mini-cliente web / payloads) | ✅ `public/index.html` + exemplos `curl` |
+| ADR preenchido no README, com alternativas descartadas justificadas | ✅ ADR-01 a ADR-09, incluindo Outbox/Saga/CAP/Cache-Aside |
+| Exemplos de teste (mini-cliente web / payloads) | ✅ `public/index.html` + `postman_collection.json` + exemplos `curl` |
+| Transactional Outbox resolvendo o Dual-Write API↔fila | ✅ `db/init.sql` (tabela `outbox`) + `src/outboxRelay.js` |
+| Cache-Aside com Redis (`GET /videos/:id`), Penetration e Stampede mitigados | ✅ `usecases/getVideoStatus.js` + `infra/redisVideoCache.js` |
 | Tag Git `v1.0.0` no código avaliado | ⚠️ **ver seção 9 — a tag existe mas está desatualizada** |
 | Repositório publicado no GitHub da disciplina | ⚠️ **ver seção 9 — nenhum remote configurado ainda** |
 
@@ -214,18 +269,14 @@ prova que a camada `services/` está isolada (um endpoint real só troca a env v
 
 Dois pontos abertos, encontrados nesta revisão:
 
-### 9.1 A tag `v1.0.0` está um commit atrás do HEAD
+### 9.1 A tag `v1.0.0` provavelmente está atrás do HEAD
 
-```
-v1.0.0 → a83a20e  "Milestone 5: README, ADR e testes de domínio"
-HEAD   → adab7e7  "Adiciona cobertura de testes para usecases/interfaces
-                    e corrige bug de SSE multi-cliente"
-```
-
-O último commit corrige um bug real (duas conexões SSE no mesmo vídeo) e
-adiciona testes — ou seja, é código melhor que o que a tag aponta hoje. Como
-a tag ainda não foi enviada a nenhum remoto, é seguro só movê-la para o
-commit atual:
+Esta entrega adicionou Transactional Outbox e Cache-Aside com Redis
+(seção 6.7) depois da tag `v1.0.0` original ter sido criada. Confira com
+`git log --oneline v1.0.0..HEAD` — se houver qualquer commit novo listado,
+a tag está desatualizada. Como ela ainda não foi enviada a nenhum remoto,
+é seguro só movê-la para o commit atual (crie/finalize o commit desta
+entrega antes):
 
 ```bash
 git tag -d v1.0.0

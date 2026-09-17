@@ -189,6 +189,39 @@
 
     .destination.visible { display: block; }
 
+    .status-lookup {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid var(--card-border);
+    }
+
+    .status-lookup button {
+      margin-top: 0;
+      width: auto;
+      padding: 8px 14px;
+      font-size: 0.85rem;
+      background: transparent;
+      border: 1px solid var(--accent);
+      color: var(--accent);
+    }
+
+    .status-lookup button:hover { background: var(--accent-dim); }
+
+    #status-lookup-result {
+      margin-top: 10px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.78rem;
+      white-space: pre-wrap;
+      word-break: break-all;
+      color: var(--muted);
+    }
+
+    #status-lookup-timing {
+      font-size: 0.78rem;
+      color: var(--accent);
+      margin-left: 8px;
+    }
+
     .destination .label {
       font-size: 0.78rem;
       text-transform: uppercase;
@@ -337,6 +370,12 @@
       <div class="destination-dir" id="destination-dir"></div>
       <ul id="file-list"></ul>
     </div>
+
+    <div class="status-lookup">
+      <button type="button" id="status-lookup-btn">Consultar status (GET /videos/:id — cache-aside)</button>
+      <span id="status-lookup-timing"></span>
+      <pre id="status-lookup-result"></pre>
+    </div>
   </div>
 
   <script>
@@ -474,6 +513,32 @@
       });
       destinationEl.classList.toggle('visible', (destination.files || []).length > 0);
     }
+
+    // --- consulta de status (demonstra o Cache-Aside com Redis) ---------
+    const statusLookupBtn = document.getElementById('status-lookup-btn');
+    const statusLookupResult = document.getElementById('status-lookup-result');
+    const statusLookupTiming = document.getElementById('status-lookup-timing');
+
+    statusLookupBtn.addEventListener('click', async () => {
+      if (!currentVideoId) {
+        statusLookupResult.textContent = 'Envie um vídeo primeiro.';
+        return;
+      }
+
+      const start = performance.now();
+      let response;
+      try {
+        response = await fetch(`/videos/${currentVideoId}`);
+      } catch (err) {
+        statusLookupResult.textContent = 'Falha de rede ao consultar status.';
+        return;
+      }
+      const elapsedMs = (performance.now() - start).toFixed(1);
+      const body = await response.json().catch(() => ({}));
+
+      statusLookupTiming.textContent = `${elapsedMs} ms (compare a 1ª chamada, cache miss, com as seguintes, cache hit)`;
+      statusLookupResult.textContent = JSON.stringify(body, null, 2);
+    });
 
     function markFileReady(outputPath) {
       const li = fileListEl.querySelector(`li[data-file="${CSS.escape(outputPath)}"]`);

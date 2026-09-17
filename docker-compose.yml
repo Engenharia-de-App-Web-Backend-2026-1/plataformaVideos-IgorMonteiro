@@ -35,6 +35,11 @@ services:
   redis:
     image: redis:7-alpine
     container_name: p1-redis
+    # allkeys-lru: as chaves aqui são cache de status (cache-aside) e
+    # contadores de rate limit, todas de vida curta e sem persistência
+    # exigida — mesma lógica de "remover o que está ocioso primeiro" usada
+    # para sessões (ver README/ADR "Política de evicção").
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
     ports:
       - "6380:6379"
     healthcheck:
@@ -52,10 +57,14 @@ services:
     environment:
       PORT: 3000
       DATABASE_URL: postgres://videos:videos@postgres:5432/videos
-      RABBITMQ_URL: amqp://videos:videos@rabbitmq:5672
       REDIS_URL: redis://redis:6379
       STORAGE_PATH: /app/storage
       TRANSCRIPTION_API_URL: http://transcription.invalid/v1
+      CACHE_TTL_SECONDS: 30
+      CACHE_JITTER_SECONDS: 10
+      CACHE_NOT_FOUND_TTL_SECONDS: 60
+      RATE_LIMIT_WINDOW_SECONDS: 60
+      RATE_LIMIT_MAX: 20
     ports:
       - "3000:3000"
     volumes:
@@ -63,11 +72,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
       redis:
         condition: service_healthy
     restart: unless-stopped
+    # Sem depender do RabbitMQ: a API só grava no Postgres (vídeo + evento na
+    # outbox). Quem publica na fila é o outbox-relay — a API aceita uploads
+    # normalmente mesmo se o broker estiver fora do ar (ver README/ADR).
 
   # sem container_name: permite `docker compose up -d --scale worker=3`
   worker:
@@ -89,6 +99,28 @@ services:
       rabbitmq:
         condition: service_healthy
       redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Outbox relay (Polling Publisher): drena a tabela `outbox` e publica cada
+  # evento pendente na fila AMQP (ver README/ADR "Transactional Outbox").
+  # Tem container_name de propósito — ao contrário do worker, não faz
+  # sentido escalar isso horizontalmente neste projeto (o volume de uploads
+  # não justifica; `FOR UPDATE SKIP LOCKED` já deixaria seguro se precisasse).
+  outbox-relay:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: p1-outbox-relay
+    command: node src/outboxRelay.js
+    environment:
+      DATABASE_URL: postgres://videos:videos@postgres:5432/videos
+      RABBITMQ_URL: amqp://videos:videos@rabbitmq:5672
+      OUTBOX_POLL_INTERVAL_MS: 500
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     restart: unless-stopped
 
